@@ -1,4 +1,11 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,7 +23,11 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
+    int ret = system(cmd);
+    if(ret != 0)
+    {
+        return false;
+    }
     return true;
 }
 
@@ -47,7 +58,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 /*
  * TODO:
@@ -59,9 +70,17 @@ bool do_exec(int count, ...)
  *
 */
 
+    int status = 0;
+
+    pid_t pid = fork();
+    if(pid == 0) {
+        execv(command[0], &command[0]);
+    } else {
+        wait(&status);
+    }
     va_end(args);
 
-    return true;
+    return status != 0 ? false : true;
 }
 
 /**
@@ -82,7 +101,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    // command[count] = command[count];
 
 
 /*
@@ -93,7 +112,22 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
+    int status = 0;
+    pid_t pid = fork();
+    if(pid == 0)
+    {
+        int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+        if (fd < 0) { perror("open"); abort(); }
+        if (dup2(fd, 1) < 0) { perror("dup2"); abort(); }
+        close(fd);
+        execv(command[0], &command[0]); perror("execvp"); abort();
+    }
+    else
+    {
+        wait(&status);
+    }
+
     va_end(args);
 
-    return true;
+    return status != 0 ? false : true;
 }
