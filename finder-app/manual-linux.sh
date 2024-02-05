@@ -43,6 +43,7 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
 fi
 
 echo "Adding the Image in outdir"
+cp ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ${OUTDIR}/
 
 echo "Creating the staging directory for the root filesystem"
 cd "$OUTDIR"
@@ -84,20 +85,20 @@ ${CROSS_COMPILE}readelf -a ${OUTDIR}/rootfs/bin/busybox | grep "Shared library"
 echo "Adding lib dependencies to rootfs/lib"
 export SYSROOT=$(${CROSS_COMPILE}gcc -print-sysroot)
 
-sudo	cp -aL "${SYSROOT}/lib/ld-linux-aarch64.so.1" "${OUTDIR}/rootfs/lib"
-sudo	cp -aL "${SYSROOT}/lib64/libm.so.6" "${OUTDIR}/rootfs/lib64"
-sudo	cp -aL "${SYSROOT}/lib64/libresolv.so.2" "${OUTDIR}/rootfs/lib64"
-sudo	cp -aL "${SYSROOT}/lib64/libc.so.6" "${OUTDIR}/rootfs/lib64"
+sudo cp -aL "${SYSROOT}/lib/ld-linux-aarch64.so.1" "${OUTDIR}/rootfs/lib"
+sudo cp -aL "${SYSROOT}/lib64/libm.so.6" "${OUTDIR}/rootfs/lib64"
+sudo cp -aL "${SYSROOT}/lib64/libresolv.so.2" "${OUTDIR}/rootfs/lib64"
+sudo cp -aL "${SYSROOT}/lib64/libc.so.6" "${OUTDIR}/rootfs/lib64"
 
 # TODO: Make device nodes
-sudo mknod -m 666 ${SYSROOT}/dev/null c 1 3
-sudo mlnod -m 600 ${SYSROOT}/dev/console c 5 1
+sudo mknod -m 666 ${OUTDIR}/rootfs/dev/null c 1 3
+sudo mknod -m 600 ${OUTDIR}/rootfs/dev/console c 5 1
 
 # TODO: Clean and build the writer utility
 echo "Cleaning and building writer"
 cd ${FINDER_APP_DIR}
 make clean
-make CROSS_COMPILE=${CROSS_COMPILE}
+CROSS_COMPILE=${CROSS_COMPILE} make
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
@@ -105,7 +106,7 @@ echo "Copying the required files on target rootfs/home"
 cp writer "${OUTDIR}/rootfs/home"
 cp finder.sh "${OUTDIR}/rootfs/home"
 cp finder-test.sh "${OUTDIR}/rootfs/home"
-cp -r ./conf "${OUTDIR}/rootfs/home"
+cp -Lr ./conf "${OUTDIR}/rootfs/home"
 cp autorun-qemu.sh "${OUTDIR}/rootfs/home"
 
 # TODO: Chown the root directory
@@ -114,4 +115,4 @@ sudo chown -R root:root *
 
 # TODO: Create initramfs.cpio.gz
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
-gzip -f initramfs.cpio
+gzip -f ${OUTDIR}/initramfs.cpio

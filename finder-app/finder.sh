@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 if [ $# -lt 2 ]; then echo "need two arguments"; exit 1; fi;
 if ! [ -d $1 ]; then echo "first arg not a dir"; exit 1; fi;
