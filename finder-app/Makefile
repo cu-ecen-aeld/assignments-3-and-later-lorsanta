@@ -6,6 +6,8 @@ else
 	GCC = gcc
 endif
 
+all: writer
+
 writer: $(OBJ_FILES)
 	$(GCC) $< -o $@
 
