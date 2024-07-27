@@ -1,0 +1,2 @@
+#!/bin/sh
+start-stop-daemon -S --startas aesdsocket --name aesdsocket aesdsocket -- -d
