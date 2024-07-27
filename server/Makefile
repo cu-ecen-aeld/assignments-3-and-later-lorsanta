@@ -5,7 +5,6 @@ ifeq "$(CROSS_COMPILE)" "aarch64-none-linux-gnu-"
 else
 	GCC = gcc
 endif
-CFLAGS = -Wall -Werror -g
 
 all: aesdsocket
 
