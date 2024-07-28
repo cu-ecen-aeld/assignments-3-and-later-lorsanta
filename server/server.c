@@ -106,7 +106,7 @@ int serverfn(void)
 		return -1;
 	}
 
-	if(listen(socketfd, 0) == -1)
+	if(listen(socketfd, SOMAXCONN) == -1)
 	{
 		perror("listen");
 		return -1;

@@ -9,10 +9,10 @@ endif
 all: aesdsocket
 
 aesdsocket: $(OBJ_FILES)
-	$(GCC) $(CFLAGS) $< -o $@
+	$(GCC) $< -o $@
 
 $(OBJ_FILES) : $(C_FILES)
-	$(GCC) $(CFLAGS) $< -c -o $@
+	$(GCC) $< -c -o $@
 
 clean:
 	rm -f $(OBJ_FILES) aesdsocket
