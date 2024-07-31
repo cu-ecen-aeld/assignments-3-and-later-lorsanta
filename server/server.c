@@ -12,12 +12,39 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <errno.h>
+#include <pthread.h>
+#include "queue.h"
 
 static int keep_accepting_connections = 1;
+static pthread_mutex_t mutex;
+static int aesdsocketdatafd;
+
+struct slist_data_s {
+	int fd;
+	pthread_t thread;
+	int completed;
+	SLIST_ENTRY(slist_data_s) entries;
+};
 
 void termination_handler (int signum)
 {
 	keep_accepting_connections = 0;
+}
+
+void alarm_handler (int signum)
+{
+	char outstr[200];
+	alarm(10);
+
+	time_t t = time(NULL);
+	struct tm *tmp = localtime(&t);
+	strftime(outstr, sizeof(outstr), "%a, %d %b %Y %T %z", tmp);
+
+	pthread_mutex_lock(&mutex);
+	write(aesdsocketdatafd, "timestamp:", strlen("timestamp:"));
+	write(aesdsocketdatafd, outstr, strlen(outstr));
+	write(aesdsocketdatafd, "\n", 1);
+	pthread_mutex_unlock(&mutex);
 }
 
 int read_packet(int fd)
@@ -26,14 +53,6 @@ int read_packet(int fd)
 	char *packet = NULL;
 	int j = 0;
 	int found_newline = 0;
-
-	int aesdsocketdatafd = open("/var/tmp/aesdsocketdata", O_CREAT | O_RDWR | O_APPEND, 0664);
-	if(aesdsocketdatafd == -1) {
-		perror("open /var/tmp/aesdsocketdata");
-		return -1;
-	}
-
-	lseek(aesdsocketdatafd, 0, SEEK_SET);
 
 	while(!found_newline)
 	{
@@ -48,12 +67,15 @@ int read_packet(int fd)
 		{
 			if(buf[i] == '\n') {
 				int r;
+				pthread_mutex_lock(&mutex);
+				lseek(aesdsocketdatafd, 0, SEEK_SET);
 				while((r = read(aesdsocketdatafd, buf, 1024)) > 0)
 				{
 					write(fd, buf, r);
 				}
-				write(fd, packet, j);
 				write(aesdsocketdatafd, packet, j);
+				pthread_mutex_unlock(&mutex);
+				write(fd, packet, j);
 				found_newline = 1;
 				break;
 			}
@@ -61,9 +83,22 @@ int read_packet(int fd)
 	}
 
 	free(packet);
-	close(aesdsocketdatafd);
 
 	return 1;
+}
+
+void* handle_clientfn(void *data)
+{
+	int keep_reading_packets = 1;
+	struct slist_data_s *elem = (struct slist_data_s *)data;
+	while(keep_reading_packets)
+	{
+		keep_reading_packets = read_packet(elem->fd) && keep_accepting_connections;
+	}
+
+	elem->completed = 1;
+
+	return NULL;
 }
 
 int serverfn(void)
@@ -72,21 +107,27 @@ int serverfn(void)
 
 	openlog("aesdsocket", 0, LOG_USER);
 
+	struct sigaction termination_action, alarm_action, old_action;
 
-	struct sigaction new_action, old_action;
+	termination_action.sa_handler = termination_handler;
+	sigemptyset (&termination_action.sa_mask);
+	termination_action.sa_flags = 0;
 
-	/* Set up the structure to specify the new action. */
-	new_action.sa_handler = termination_handler;
-	sigemptyset (&new_action.sa_mask);
-	new_action.sa_flags = 0;
+	alarm_action.sa_handler = alarm_handler;
+	sigemptyset (&alarm_action.sa_mask);
+	alarm_action.sa_flags = 0;
 
 	sigaction (SIGINT, NULL, &old_action);
 	if (old_action.sa_handler != SIG_IGN)
-	sigaction (SIGINT, &new_action, NULL);
+		sigaction (SIGINT, &termination_action, NULL);
 
 	sigaction (SIGTERM, NULL, &old_action);
 	if (old_action.sa_handler != SIG_IGN)
-	sigaction (SIGTERM, &new_action, NULL);
+		sigaction (SIGTERM, &termination_action, NULL);
+
+	sigaction (SIGALRM, NULL, &old_action);
+	if (old_action.sa_handler != SIG_IGN)
+		sigaction (SIGALRM, &alarm_action, NULL);
 
 
 	if((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -112,31 +153,75 @@ int serverfn(void)
 		return -1;
 	}
 
+	pthread_mutex_init(&mutex, NULL);
+
+	SLIST_HEAD(slisthead, slist_data_s) thread_list = SLIST_HEAD_INITIALIZER(thread_list);
+	SLIST_INIT(&thread_list);
+
+	aesdsocketdatafd = open("/var/tmp/aesdsocketdata", O_CREAT | O_RDWR | O_APPEND, 0664);
+	if(aesdsocketdatafd == -1) {
+		perror("open /var/tmp/aesdsocketdata");
+		return -1;
+	}
+
+	alarm(10);
+
 	while(keep_accepting_connections)
 	{
-		int fd;
 		char ipaddr[INET_ADDRSTRLEN];
 		struct sockaddr_in client_addr;
 		unsigned int sin_size = sizeof(client_addr);
-		if((fd = accept(socketfd, (struct sockaddr *) &client_addr, &sin_size)) == -1) {
-			if (errno == EINTR) break;
-			perror("accept");
+
+		struct slist_data_s *list_elem = malloc(sizeof(struct slist_data_s));
+		SLIST_INSERT_HEAD(&thread_list, list_elem, entries);
+
+		list_elem->completed = 0;
+		if((list_elem->fd = accept(socketfd, (struct sockaddr *) &client_addr, &sin_size)) == -1) {
+			if (errno == EINTR )
+			{
+				if(!keep_accepting_connections) break;
+			}
+			else
+			{
+				perror("accept");
+				return -1;
+			}
+		}
+
+		inet_ntop(AF_INET, &(client_addr.sin_addr), ipaddr, INET_ADDRSTRLEN);
+
+		syslog(LOG_USER, "Accepted connection from %s", ipaddr);
+
+		if(pthread_create(&list_elem->thread, NULL, &handle_clientfn, list_elem) != 0)
+		{
+			perror("pthread_create");
 			return -1;
 		}
-		inet_ntop(AF_INET, &(client_addr.sin_addr), ipaddr, INET_ADDRSTRLEN);
-		
-		syslog(LOG_USER, "Accepted connection from %s", ipaddr);
-		int keep_reading_packets = 1;
-		while(keep_reading_packets)
+
+		struct slist_data_s *plist_elem, *plist_elem_temp;
+		SLIST_FOREACH_SAFE(plist_elem, &thread_list, entries, plist_elem_temp)
 		{
-			keep_reading_packets = read_packet(fd);
+			if(plist_elem->completed)
+			{
+				pthread_join(plist_elem->thread, NULL);
+				close(plist_elem->fd);
+				SLIST_REMOVE(&thread_list,  plist_elem, slist_data_s, entries);
+				free(plist_elem);
+				syslog(LOG_USER, "Closed connection from %s", ipaddr);
+			}
 		}
-
-		syslog(LOG_USER, "Closed connection from %s", ipaddr);
-
-		close(fd);
 	}
-	
+
+	struct slist_data_s *plist_elem, *plist_elem_temp;
+	SLIST_FOREACH_SAFE(plist_elem, &thread_list, entries, plist_elem_temp)
+	{
+		close(plist_elem->fd);
+		SLIST_REMOVE(&thread_list,  plist_elem, slist_data_s, entries);
+		free(plist_elem);
+	}
+
+	close(aesdsocketdatafd);
+	pthread_mutex_destroy(&mutex);
 	close(socketfd);
 	unlink("/var/tmp/aesdsocketdata");
 	closelog();

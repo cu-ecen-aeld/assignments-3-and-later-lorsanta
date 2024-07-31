@@ -1,4 +1,5 @@
 C_FILES = $(wildcard *.c)
+CFLAGS = -lpthread -g -Wall
 OBJ_FILES = $(patsubst %.c, %.o, $(wildcard *.c))
 ifeq "$(CROSS_COMPILE)" "aarch64-none-linux-gnu-"
 	GCC = $(CROSS_COMPILE)gcc
@@ -9,10 +10,10 @@ endif
 all: aesdsocket
 
 aesdsocket: $(OBJ_FILES)
-	$(GCC) $< -o $@
+	$(GCC) $(CFLAGS) $< -o $@
 
 $(OBJ_FILES) : $(C_FILES)
-	$(GCC) $< -c -o $@
+	$(GCC) $(CFLAGS) $< -c -o $@
 
 clean:
 	rm -f $(OBJ_FILES) aesdsocket
