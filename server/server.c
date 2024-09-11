@@ -107,6 +107,7 @@ int serverfn(void)
 
 	openlog("aesdsocket", 0, LOG_USER);
 
+	#if !USE_AESD_CHAR_DEVICE
 	struct sigaction termination_action, alarm_action, old_action;
 
 	termination_action.sa_handler = termination_handler;
@@ -128,7 +129,7 @@ int serverfn(void)
 	sigaction (SIGALRM, NULL, &old_action);
 	if (old_action.sa_handler != SIG_IGN)
 		sigaction (SIGALRM, &alarm_action, NULL);
-
+	#endif
 
 	if((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		perror("socket");
@@ -158,13 +159,23 @@ int serverfn(void)
 	SLIST_HEAD(slisthead, slist_data_s) thread_list = SLIST_HEAD_INITIALIZER(thread_list);
 	SLIST_INIT(&thread_list);
 
+	#if USE_AESD_CHAR_DEVICE
+	aesdsocketdatafd = open("/dev/aesdchar", O_RDWR | O_APPEND);
+	if(aesdsocketdatafd == -1) {
+		perror("open /dev/aesdchar");
+		return -1;
+	}
+	#else
 	aesdsocketdatafd = open("/var/tmp/aesdsocketdata", O_CREAT | O_RDWR | O_APPEND, 0664);
 	if(aesdsocketdatafd == -1) {
 		perror("open /var/tmp/aesdsocketdata");
 		return -1;
 	}
+	#endif
 
+	#if !USE_AESD_CHAR_DEVICE
 	alarm(10);
+	#endif
 
 	while(keep_accepting_connections)
 	{
@@ -223,7 +234,9 @@ int serverfn(void)
 	close(aesdsocketdatafd);
 	pthread_mutex_destroy(&mutex);
 	close(socketfd);
+	#if !USE_AESD_CHAR_DEVICE
 	unlink("/var/tmp/aesdsocketdata");
+	#endif
 	closelog();
 
 	return 0;
