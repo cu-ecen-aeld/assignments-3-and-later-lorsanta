@@ -15,7 +15,6 @@
 #endif
 
 #include "aesd-circular-buffer.h"
-#include <stdio.h>
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
  * @param char_offset the position to search for in the buffer list, describing the zero referenced
@@ -39,7 +38,7 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     {
         if(char_offset < buffer->entry[i].size)
         {
-            *entry_offset_byte_rtn = char_offset;
+            *entry_offset_byte_rtn = buffer->entry[i].buffptr[char_offset];
             return &buffer->entry[i];
         }
         else
