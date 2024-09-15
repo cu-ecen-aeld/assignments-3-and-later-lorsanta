@@ -17,8 +17,9 @@
 
 static int keep_accepting_connections = 1;
 static pthread_mutex_t mutex;
+#if !USE_AESD_CHAR_DEVICE
 static int aesdsocketdatafd;
-
+#endif
 struct slist_data_s {
 	int fd;
 	pthread_t thread;
@@ -31,6 +32,7 @@ void termination_handler (int signum)
 	keep_accepting_connections = 0;
 }
 
+#if !USE_AESD_CHAR_DEVICE
 void alarm_handler (int signum)
 {
 	char outstr[200];
@@ -46,6 +48,7 @@ void alarm_handler (int signum)
 	write(aesdsocketdatafd, "\n", 1);
 	pthread_mutex_unlock(&mutex);
 }
+#endif
 
 int read_packet(int fd)
 {
@@ -67,6 +70,13 @@ int read_packet(int fd)
 		{
 			if(buf[i] == '\n') {
 				int r;
+				#if USE_AESD_CHAR_DEVICE
+				int aesdsocketdatafd = open("/dev/aesdchar", O_CREAT | O_RDWR | O_APPEND, 0664);
+				if(aesdsocketdatafd == -1) {
+					perror("open /dev/aesdchar");
+					return -1;
+				}
+				#endif
 				pthread_mutex_lock(&mutex);
 				lseek(aesdsocketdatafd, 0, SEEK_SET);
 				while((r = read(aesdsocketdatafd, buf, 1024)) > 0)
@@ -74,6 +84,9 @@ int read_packet(int fd)
 					write(fd, buf, r);
 				}
 				write(aesdsocketdatafd, packet, j);
+				#if USE_AESD_CHAR_DEVICE
+				close(aesdsocketdatafd);
+				#endif
 				pthread_mutex_unlock(&mutex);
 				write(fd, packet, j);
 				found_newline = 1;
@@ -159,13 +172,7 @@ int serverfn(void)
 	SLIST_HEAD(slisthead, slist_data_s) thread_list = SLIST_HEAD_INITIALIZER(thread_list);
 	SLIST_INIT(&thread_list);
 
-	#if USE_AESD_CHAR_DEVICE
-	aesdsocketdatafd = open("/dev/aesdchar", O_RDWR | O_APPEND);
-	if(aesdsocketdatafd == -1) {
-		perror("open /dev/aesdchar");
-		return -1;
-	}
-	#else
+	#if !USE_AESD_CHAR_DEVICE
 	aesdsocketdatafd = open("/var/tmp/aesdsocketdata", O_CREAT | O_RDWR | O_APPEND, 0664);
 	if(aesdsocketdatafd == -1) {
 		perror("open /var/tmp/aesdsocketdata");
@@ -231,7 +238,9 @@ int serverfn(void)
 		free(plist_elem);
 	}
 
+	#if !USE_AESD_CHAR_DEVICE
 	close(aesdsocketdatafd);
+	#endif
 	pthread_mutex_destroy(&mutex);
 	close(socketfd);
 	#if !USE_AESD_CHAR_DEVICE
