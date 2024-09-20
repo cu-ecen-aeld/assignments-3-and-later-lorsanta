@@ -34,11 +34,12 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     int c = 0;
     int i = buffer->out_offs;
     int n = buffer->full ? AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED : buffer->in_offs;
+    *entry_offset_byte_rtn = 0;
     while(c < n)
     {
         if(char_offset < buffer->entry[i].size)
         {
-            *entry_offset_byte_rtn = buffer->entry[i].buffptr[char_offset];
+            *entry_offset_byte_rtn = char_offset;
             return &buffer->entry[i];
         }
         else

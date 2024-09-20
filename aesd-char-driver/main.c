@@ -20,6 +20,7 @@
 #include <linux/slab.h>    // kzalloc
 #include <linux/uaccess.h> // copy_from_user
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -29,6 +30,69 @@ MODULE_LICENSE("Dual BSD/GPL");
 struct aesd_dev aesd_device;
 char *remaining_buf = NULL;
 size_t remaining_buf_len = 0;
+
+long aesd_ioctl(struct file *file, unsigned int request, unsigned long data)
+{
+    struct aesd_seekto seekto;
+    struct aesd_dev *dev;
+    loff_t newpos = 0;
+    int i;
+
+    switch(request)
+    {
+        case AESDCHAR_IOCSEEKTO:
+            copy_from_user(&seekto, (struct aesd_seekto*) data, sizeof(struct aesd_seekto));
+            dev = file->private_data;
+            
+            PDEBUG("seekto %d %d\n", seekto.write_cmd, seekto.write_cmd_offset);
+
+            if( seekto.write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED ||
+                seekto.write_cmd_offset >= dev->cbuffer->entry[seekto.write_cmd].size )
+                return -EINVAL;
+            
+            for(i = 0; i < seekto.write_cmd; i++)
+                newpos += dev->cbuffer->entry[i].size;
+            newpos += seekto.write_cmd_offset;
+            file->f_pos = newpos;
+            break;
+        default:
+            return -EINVAL;
+    }
+
+    return 0;
+}
+
+loff_t aesd_llseek(struct file *filp, loff_t off, int whence)
+{
+    loff_t newpos = 0;
+    int i;
+
+    switch (whence)
+    {
+    case SEEK_SET:
+        newpos = off;
+        break;
+    case SEEK_CUR:
+        newpos = filp->f_pos + off;
+        break;
+    case SEEK_END:
+        if(off < 0) return -EINVAL;
+        for(i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; i++)
+            if(aesd_device.cbuffer->entry[i].buffptr)
+                newpos += aesd_device.cbuffer->entry[i].size;
+            else
+                break;
+        newpos += off;
+        break;
+    default:
+        return -EINVAL;
+    }
+    if (newpos < 0)
+        return -EINVAL;
+    filp->f_pos = newpos;
+
+    return newpos;
+}
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
@@ -40,6 +104,7 @@ int aesd_open(struct inode *inode, struct file *filp)
      */
     dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
     filp->private_data = dev;
+    filp->f_pos = 0;
 
     return 0;
 }
@@ -60,26 +125,26 @@ int aesd_release(struct inode *inode, struct file *filp)
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-    struct aesd_dev *dev;
-    struct aesd_buffer_entry *entry;
+    struct aesd_dev *dev = filp->private_data;
+    struct aesd_buffer_entry *entry = NULL;
     ssize_t retval = 0;
-    size_t entry_offset_byte_rtn;
+    size_t entry_offset_byte_rtn = 0;
 
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle read
      */
-    dev = filp->private_data;
     while(retval < count) {
         entry = aesd_circular_buffer_find_entry_offset_for_fpos(dev->cbuffer, retval + *f_pos, &entry_offset_byte_rtn);
         if(entry) {
-            int size = entry->size > count ? entry->size - count : entry->size;
-            copy_to_user(buf + retval, entry->buffptr, size);
+            int size = entry->size - entry_offset_byte_rtn;
+            size = size > count ? count : size;
+            copy_to_user(buf + retval, entry->buffptr + entry_offset_byte_rtn, size);
             retval += size;
         }
         else break;
     }
-    *f_pos = retval;
+    *f_pos += retval;
     return retval;
 }
 
@@ -147,6 +212,8 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .unlocked_ioctl = aesd_ioctl,
+    .llseek = aesd_llseek
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)

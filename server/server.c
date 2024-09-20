@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include "queue.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 static int keep_accepting_connections = 1;
 static pthread_mutex_t mutex;
@@ -70,6 +71,7 @@ int read_packet(int fd)
 		{
 			if(buf[i] == '\n') {
 				int r;
+				int sent_iocseekto_cmd = 0;
 				#if USE_AESD_CHAR_DEVICE
 				int aesdsocketdatafd = open("/dev/aesdchar", O_CREAT | O_RDWR | O_APPEND, 0664);
 				if(aesdsocketdatafd == -1) {
@@ -79,16 +81,36 @@ int read_packet(int fd)
 				#endif
 				pthread_mutex_lock(&mutex);
 				lseek(aesdsocketdatafd, 0, SEEK_SET);
+				if( memcmp(packet, "AESDCHAR_IOCSEEKTO:", sizeof("AESDCHAR_IOCSEEKTO:")-1) == 0 )
+				{
+					char *pbuf = packet + sizeof("AESDCHAR_IOCSEEKTO:") - 1;
+					struct aesd_seekto seekto;
+
+					seekto.write_cmd = *pbuf - '0'; pbuf++;
+					char comma = *pbuf; pbuf++;
+					seekto.write_cmd_offset = *pbuf - '0'; pbuf++;
+					if(comma == ',')
+					{
+						sent_iocseekto_cmd = 1;
+						if(ioctl(aesdsocketdatafd, AESDCHAR_IOCSEEKTO, &seekto) < 0)
+							perror("AESDCHAR_IOCSEEKTO");
+					}
+				}
 				while((r = read(aesdsocketdatafd, buf, 1024)) > 0)
 				{
 					write(fd, buf, r);
 				}
-				write(aesdsocketdatafd, packet, j);
+				if(sent_iocseekto_cmd == 0) {
+					write(aesdsocketdatafd, packet, j);
+				}
 				#if USE_AESD_CHAR_DEVICE
 				close(aesdsocketdatafd);
 				#endif
 				pthread_mutex_unlock(&mutex);
-				write(fd, packet, j);
+				if(sent_iocseekto_cmd == 0) {
+					write(fd, packet, j);
+				}
+				else sent_iocseekto_cmd = 0;
 				found_newline = 1;
 				break;
 			}
